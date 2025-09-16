@@ -49,6 +49,25 @@ app.get('/products', async (req, res) => {
     console.error(e); res.status(500).json({ error: 'database_error' });
   }
 });
+// même sortie que /products, avec un cache un peu plus long (pratique pour Duda)
+app.get('/products-all', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
+             p.is_available, p.created_at, p.updated_at,
+             p.category_id, c.name AS category_name, c.slug AS category_slug
+      FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
+      ORDER BY p.created_at DESC
+    `);
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60'); // 5 min
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'database_error' });
+  }
+});
+
 
 app.get('/products/:slug', async (req, res) => {
   try {
