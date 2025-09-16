@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Catalogue</title>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;margin:24px;max-width:1100px}
+  h1{margin-bottom:8px}
+  .grid{display:grid;grid-template-columns:2fr 3fr;gap:24px}
+  form{border:1px solid #eee;padding:16px;border-radius:12px}
+  input,select,textarea{width:100%;padding:8px;margin:6px 0;box-sizing:border-box}
+  .btn{padding:8px 12px;border:1px solid #ddd;border-radius:8px;background:#f7f7f7;cursor:pointer}
+  .btn.primary{background:#111;color:#fff;border-color:#111}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{border:1px solid #eee;padding:8px;text-align:left;vertical-align:top}
+  img.thumb{width:80px;height:60px;object-fit:cover;border-radius:6px}
+  .row-actions{display:flex;gap:6px}
+  .muted{opacity:.7;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Admin Catalogue</h1>
+<p class="muted">Image : soit vous collez une <b>URL</b>, soit vous uploadez un <b>fichier</b>. Si fichier, il sera stocké en base et l’URL deviendra <code>/images/&lt;id&gt;</code>.</p>
+
+<div class="grid">
+  <form id="form">
+    <input type="hidden" name="id" id="id">
+
+    <label>Nom</label>
+    <input name="name" id="name" required>
+
+    <label>Slug (laisser vide = auto)</label>
+    <input name="slug" id="slug" placeholder="auto">
+
+    <label>Description</label>
+    <textarea name="description" id="description"></textarea>
+
+    <label>Prix (€)</label>
+    <input type="number" step="0.01" name="price" id="price">
+
+    <label>Stock</label>
+    <input type="number" name="stock" id="stock">
+
+    <label>Catégorie</label>
+    <select name="category_id" id="category_id"></select>
+
+    <label>Disponible</label>
+    <input type="checkbox" name="is_available" id="is_available" checked>
+
+    <label>URL de l'image</label>
+    <input type="url" name="image_url" id="image_url" placeholder="https://...">
+
+    <label>OU choisir un fichier</label>
+    <input type="file" name="image" id="image" accept="image/*">
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn primary" type="submit" id="submitBtn">Créer</button>
+      <button class="btn" type="button" id="resetBtn">Réinitialiser</button>
+    </div>
+    <p id="msg" class="muted"></p>
+  </form>
+
+  <div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>Produits</h3>
+      <button class="btn" id="refreshBtn">Rafraîchir</button>
+    </div>
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Image</th><th>Nom</th><th>Catégorie</th><th>Prix</th><th>Stock</th><th>Actif</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = ''; // si vide => même origine. Sinon mets ex: "https://ton-api.onrender.com"
+const qs = s => document.querySelector(s);
+const qsa = s => Array.from(document.querySelectorAll(s));
+const form = qs('#form');
+const msg = qs('#msg');
+const tableBody = qs('#table tbody');
+const submitBtn = qs('#submitBtn');
+
+async function fetchJSON(url, opt) {
+  const r = await fetch(url, opt);
+  if (!r.ok) throw new Error(await r.text());
+  const ct = r.headers.get('content-type')||'';
+  return ct.includes('application/json') ? r.json() : r.text();
+}
+
+async function loadCategories() {
+  const cats = await fetchJSON(API + '/categories');
+  const sel = qs('#category_id');
+  sel.innerHTML = '<option value="">—</option>' + cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+async function loadProducts() {
+  const items = await fetchJSON(API + '/products');
+  tableBody.innerHTML = items.map(p => `
+    <tr>
+      <td>${p.image_url ? `<img class="thumb" src="${p.image_url}">` : ''}</td>
+      <td><strong>${p.name}</strong><br><span class="muted">${p.slug}</span></td>
+      <td>${p.category_name || ''}</td>
+      <td>${p.price ?? ''}</td>
+      <td>${p.stock ?? ''}</td>
+      <td>${p.is_available ? 'Oui' : 'Non'}</td>
+      <td class="row-actions">
+        <button class="btn" data-action="edit" data-id="${p.id}">Éditer</button>
+        <button class="btn" data-action="del" data-id="${p.id}">Supprimer</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function fillForm(p) {
+  qs('#id').value = p.id || '';
+  qs('#name').value = p.name || '';
+  qs('#slug').value = p.slug || '';
+  qs('#description').value = p.description || '';
+  qs('#price').value = p.price ?? '';
+  qs('#stock').value = p.stock ?? '';
+  qs('#category_id').value = p.category_id ?? '';
+  qs('#is_available').checked = !!p.is_available;
+  qs('#image_url').value = p.image_url || '';
+  qs('#image').value = '';
+  submitBtn.textContent = p.id ? 'Enregistrer' : 'Créer';
+}
+
+tableBody.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const id = btn.getAttribute('data-id');
+  const action = btn.getAttribute('data-action');
+
+  if (action === 'edit') {
+    const items = await fetchJSON(API + '/products');
+    const p = items.find(x => x.id == id);
+    if (!p) return;
+    const detail = await fetchJSON(API + '/products/' + encodeURIComponent(p.slug));
+    fillForm(detail);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  if (action === 'del') {
+    if (!confirm('Supprimer ce produit ?')) return;
+    await fetch(API + '/admin/products/' + id, { method: 'DELETE' });
+    await loadProducts();
+  }
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg.textContent = 'Envoi...';
+  const id = qs('#id').value.trim();
+  const fd = new FormData(form);
+  if (!fd.get('is_available')) fd.set('is_available', 'off');
+
+  try {
+    if (!id) {
+      const r = await fetch(API + '/admin/products', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+    } else {
+      const r = await fetch(API + '/admin/products/' + id, { method: 'PUT', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+    }
+    msg.textContent = 'OK';
+    form.reset(); fillForm({});
+    await loadProducts();
+  } catch (err) {
+    msg.textContent = 'Erreur: ' + err.message;
+  }
+});
+
+qs('#resetBtn').addEventListener('click', () => { form.reset(); fillForm({}); });
+qs('#refreshBtn').addEventListener('click', loadProducts);
+
+(async function init(){
+  await loadCategories();
+  await loadProducts();
+})();
+</script>
+</body>
+</html>
