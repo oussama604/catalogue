@@ -107,24 +107,26 @@ app.post('/admin/products', upload.single('image'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-   const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
+    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
 
-const ins = await client.query(
-  `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available, etat)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-   RETURNING id`,
-  [
-    name,
-    finalSlug,
-    description || null,
-    price || null,
-    stock || null,
-    image_url?.trim() || null,
-    category_id || null,
-    (is_available === 'on' || is_available === 'true' || is_available === true),
-    etat || null // valeur de votre type etat_type (ex: 'Neuf')
-  ]
-);
+    const finalSlug = slug?.trim?.() || toSlug(name); // <-- assurez-vous que ceci existe
+
+    const ins = await client.query(
+      `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available, etat)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING id`,
+      [
+        name,
+        finalSlug,
+        description || null,
+        price || null,
+        stock || null,
+        image_url?.trim() || null,
+        category_id || null,
+        (is_available === 'on' || is_available === 'true' || is_available === true),
+        etat || null
+      ]
+    );
     const productId = ins.rows[0].id;
 
     if (req.file) {
@@ -159,6 +161,7 @@ app.put('/admin/products/:id', upload.single('image'), async (req, res) => {
 
     const id = req.params.id;
     const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
+    const finalSlug = slug?.trim?.() || (name ? toSlug(name) : undefined);
 
 await client.query(
   `UPDATE products
@@ -237,4 +240,3 @@ const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`✅ API running on http://localhost:${port}`);
 });
-
