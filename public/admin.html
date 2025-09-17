@@ -104,11 +104,13 @@ async function loadCategories() {
 
 function populateEtatOptionsFromProducts(items) {
   const sel = qs('#etat');
-  const known = new Set(['Neuf','Occasion','Reconditionné']);
-  for (const p of items) if (p.etat) known.add(String(p.etat));
-  const opts = Array.from(known).sort((a,b)=>a.localeCompare(b,'fr'));
+  // Valeurs conformes à l'enum etat_type
+  const ETAT_VALUES = ['Neuf','Excellente','Très bon','Bon','Correct','Usage visible'];
+  // Ajoute d'éventuelles valeurs existantes en base (sécurité, lecture seule si non standard)
+  const extra = new Set();
+  for (const p of items) if (p.etat && !ETAT_VALUES.includes(p.etat)) extra.add(String(p.etat));
+  const opts = [...ETAT_VALUES, ...Array.from(extra).sort((a,b)=>a.localeCompare(b,'fr'))];
   sel.innerHTML = opts.map(v=>`<option value="${v}">${v}</option>`).join('');
-  // valeur par défaut si création
   if (!qs('#id').value) sel.value = 'Neuf';
 }
 
@@ -116,9 +118,12 @@ async function loadProducts() {
   const items = await fetchJSON(API + '/products');
   // on s'assure que l'état existe aussi ici
   populateEtatOptionsFromProducts(items);
-  tableBody.innerHTML = items.map(p => `
+  const base = (API || '').replace(/\/$/, '');
+  tableBody.innerHTML = items.map(p => {
+    const src = p.image_url ? (p.image_url.startsWith('http') ? p.image_url : `${base}${p.image_url}`) : '';
+    return `
     <tr>
-      <td>${p.image_url ? `<img class="thumb" src="${p.image_url}">` : ''}</td>
+      <td>${src ? `<img class="thumb" src="${src}">` : ''}</td>
       <td><strong>${p.name}</strong><br><span class="muted">${p.slug}</span></td>
       <td>${p.category_name || ''}</td>
       <td>${p.price ?? ''}</td>
@@ -130,7 +135,7 @@ async function loadProducts() {
         <button class="btn" data-action="del" data-id="${p.id}">Supprimer</button>
       </td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 function fillForm(p) {
