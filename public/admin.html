@@ -1,242 +1,218 @@
-// server.js
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
-import slugify from 'slugify';
-import pool from './db.js';
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Catalogue</title>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;margin:24px;max-width:1100px}
+  h1{margin-bottom:8px}
+  .grid{display:grid;grid-template-columns:2fr 3fr;gap:24px}
+  form{border:1px solid #eee;padding:16px;border-radius:12px}
+  input,select,textarea{width:100%;padding:8px;margin:6px 0;box-sizing:border-box}
+  .btn{padding:8px 12px;border:1px solid #ddd;border-radius:8px;background:#f7f7f7;cursor:pointer}
+  .btn.primary{background:#111;color:#fff;border-color:#111}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{border:1px solid #eee;padding:8px;text-align:left;vertical-align:top}
+  img.thumb{width:80px;height:60px;object-fit:cover;border-radius:6px}
+  .row-actions{display:flex;gap:6px}
+  .muted{opacity:.7;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Admin Catalogue</h1>
+<p class="muted">Image : soit vous collez une <b>URL</b>, soit vous uploadez un <b>fichier</b>. Si fichier, il sera stocké en base et l’URL deviendra <code>/images/&lt;id&gt;</code>.</p>
 
-const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB
+<div class="grid">
+  <form id="form">
+    <input type="hidden" name="id" id="id">
 
-// middlewares
-app.use(cors());               // autoriser appels depuis Duda/admin
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public')); // sert public/admin.html
+    <label>Nom</label>
+    <input name="name" id="name" required>
 
-// helpers
-const toSlug = (s) => slugify(s, { lower: true, strict: true, locale: 'fr' });
+    <label>Slug (laisser vide = auto)</label>
+    <input name="slug" id="slug" placeholder="auto">
 
-// ------- routes basiques
-app.get('/', (req, res) => res.send('API OK. Essayez /health, /categories, /products, ou /admin.html'));
-app.get('/health', (req, res) => res.json({ ok: true }));
+    <label>Description</label>
+    <textarea name="description" id="description"></textarea>
 
-// ------- routes publiques (pour Duda)
-app.get('/categories', async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT id, name, slug FROM categories ORDER BY name ASC'
-    );
-    res.json(rows);
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: 'database_error' });
+    <label>Prix (€)</label>
+    <input type="number" step="0.01" name="price" id="price">
+
+    <label>Stock</label>
+    <input type="number" name="stock" id="stock">
+
+    <label>Catégorie</label>
+    <select name="category_id" id="category_id"></select>
+
+    <label>Disponible</label>
+    <input type="checkbox" name="is_available" id="is_available" checked>
+
+    <label>État</label>
+    <select name="etat" id="etat"></select>
+
+    <label>URL de l'image</label>
+    <input type="url" name="image_url" id="image_url" placeholder="https://...">
+
+    <label>OU choisir un fichier</label>
+    <input type="file" name="image" id="image" accept="image/*">
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn primary" type="submit" id="submitBtn">Créer</button>
+      <button class="btn" type="button" id="resetBtn">Réinitialiser</button>
+    </div>
+    <p id="msg" class="muted"></p>
+  </form>
+
+  <div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>Produits</h3>
+      <button class="btn" id="refreshBtn">Rafraîchir</button>
+    </div>
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Image</th><th>Nom</th><th>Catégorie</th><th>Prix</th><th>Stock</th><th>État</th><th>Actif</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = 'https://catalogue-z1qv.onrender.com'; // si vide => même origine. Sinon mets ex: "https://ton-api.onrender.com"
+const qs = s => document.querySelector(s);
+const qsa = s => Array.from(document.querySelectorAll(s));
+const form = qs('#form');
+const msg = qs('#msg');
+const tableBody = qs('#table tbody');
+const submitBtn = qs('#submitBtn');
+
+async function fetchJSON(url, opt) {
+  const r = await fetch(url, opt);
+  if (!r.ok) throw new Error(await r.text());
+  const ct = r.headers.get('content-type')||'';
+  return ct.includes('application/json') ? r.json() : r.text();
+}
+
+async function loadCategories() {
+  const cats = await fetchJSON(API + '/categories');
+  const sel = qs('#category_id');
+  sel.innerHTML = '<option value="">—</option>' + cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+function populateEtatOptionsFromProducts(items) {
+  const sel = qs('#etat');
+  // Valeurs conformes à l'enum etat_type
+  const ETAT_VALUES = ['Neuf','Excellente','Très bon','Bon','Correct','Usage visible'];
+  // Ajoute d'éventuelles valeurs existantes en base (sécurité, lecture seule si non standard)
+  const extra = new Set();
+  for (const p of items) if (p.etat && !ETAT_VALUES.includes(p.etat)) extra.add(String(p.etat));
+  const opts = [...ETAT_VALUES, ...Array.from(extra).sort((a,b)=>a.localeCompare(b,'fr'))];
+  sel.innerHTML = opts.map(v=>`<option value="${v}">${v}</option>`).join('');
+  if (!qs('#id').value) sel.value = 'Neuf';
+}
+
+async function loadProducts() {
+  const items = await fetchJSON(API + '/products');
+  // on s'assure que l'état existe aussi ici
+  populateEtatOptionsFromProducts(items);
+  const base = (API || '').replace(/\/$/, '');
+  tableBody.innerHTML = items.map(p => {
+    const src = p.image_url ? (p.image_url.startsWith('http') ? p.image_url : `${base}${p.image_url}`) : '';
+    return `
+    <tr>
+      <td>${src ? `<img class="thumb" src="${src}">` : ''}</td>
+      <td><strong>${p.name}</strong><br><span class="muted">${p.slug}</span></td>
+      <td>${p.category_name || ''}</td>
+      <td>${p.price ?? ''}</td>
+      <td>${p.stock ?? ''}</td>
+      <td>${p.etat ?? ''}</td>
+      <td>${p.is_available ? 'Oui' : 'Non'}</td>
+      <td class="row-actions">
+        <button class="btn" data-action="edit" data-id="${p.id}">Éditer</button>
+        <button class="btn" data-action="del" data-id="${p.id}">Supprimer</button>
+      </td>
+    </tr>
+  `}).join('');
+}
+
+function fillForm(p) {
+  qs('#id').value = p.id || '';
+  qs('#name').value = p.name || '';
+  qs('#slug').value = p.slug || '';
+  qs('#description').value = p.description || '';
+  qs('#price').value = p.price ?? '';
+  qs('#stock').value = p.stock ?? '';
+  qs('#category_id').value = p.category_id ?? '';
+  qs('#is_available').checked = !!p.is_available;
+  // si la liste d'états n'a pas encore l'option, on l'ajoute à la volée
+  const etatSel = qs('#etat');
+  if (p.etat && !Array.from(etatSel.options).some(o=>o.value===p.etat)) {
+    const opt = document.createElement('option'); opt.value = p.etat; opt.textContent = p.etat; etatSel.appendChild(opt);
+  }
+  etatSel.value = p.etat || 'Neuf';
+
+  qs('#image_url').value = p.image_url || '';
+  qs('#image').value = '';
+  submitBtn.textContent = p.id ? 'Enregistrer' : 'Créer';
+}
+
+tableBody.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const id = btn.getAttribute('data-id');
+  const action = btn.getAttribute('data-action');
+
+  if (action === 'edit') {
+    const items = await fetchJSON(API + '/products');
+    const p = items.find(x => x.id == id);
+    if (!p) return;
+    const detail = await fetchJSON(API + '/products/' + encodeURIComponent(p.slug));
+    fillForm(detail);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  if (action === 'del') {
+    if (!confirm('Supprimer ce produit ?')) return;
+    await fetch(API + '/admin/products/' + id, { method: 'DELETE' });
+    await loadProducts();
   }
 });
 
-app.get('/products', async (req, res) => {
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg.textContent = 'Envoi...';
+  const id = qs('#id').value.trim();
+  const fd = new FormData(form);
+  if (!fd.get('is_available')) fd.set('is_available', 'off');
+  // etat est déjà inclus car <select name="etat">
+
   try {
-    const { rows } = await pool.query(`
-  SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
-         p.is_available, p.created_at, p.updated_at, p.etat,
-         p.category_id, c.name AS category_name, c.slug AS category_slug
-  FROM products p
-  LEFT JOIN categories c ON c.id = p.category_id
-  ORDER BY p.created_at DESC
-`);
-    res.json(rows);
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: 'database_error' });
-  }
-});
-// même sortie que /products, avec un cache un peu plus long (pratique pour Duda)
-app.get('/products-all', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-  SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
-         p.is_available, p.created_at, p.updated_at, p.etat,
-         p.category_id, c.name AS category_name, c.slug AS category_slug
-  FROM products p
-  LEFT JOIN categories c ON c.id = p.category_id
-  ORDER BY p.created_at DESC
-`);
-    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60'); // 5 min
-    res.json(rows);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'database_error' });
-  }
-});
-
-
-app.get('/products/:slug', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT p.*, c.name AS category_name, c.slug AS category_slug
-      FROM products p
-      LEFT JOIN categories c ON c.id = p.category_id
-      WHERE p.slug = $1
-    `, [req.params.slug]);
-    if (!rows.length) return res.status(404).json({ error: 'not_found' });
-    res.json(rows[0]);
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: 'database_error' });
-  }
-});
-
-// servir une image binaire stockée en base
-app.get('/images/:id', async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT mime_type, bytes FROM product_images WHERE id = $1',
-      [req.params.id]
-    );
-    if (!rows.length) return res.status(404).send('Not found');
-    res.setHeader('Content-Type', rows[0].mime_type);
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    res.send(rows[0].bytes);
-  } catch (e) {
-    console.error(e); res.status(500).send('server_error');
-  }
-});
-
-// ------- routes admin (CRUD) : AUCUNE AUTH ICI (simple). À protéger si besoin.
-
-// CREATE produit (URL image OU upload fichier). Si fichier, stocke en DB et remplace image_url.
-app.post('/admin/products', upload.single('image'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
-
-    const finalSlug = slug?.trim?.() || toSlug(name); // <-- assurez-vous que ceci existe
-
-    const ins = await client.query(
-      `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available, etat)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id`,
-      [
-        name,
-        finalSlug,
-        description || null,
-        price || null,
-        stock || null,
-        image_url?.trim() || null,
-        category_id || null,
-        (is_available === 'on' || is_available === 'true' || is_available === true),
-        etat || null
-      ]
-    );
-    const productId = ins.rows[0].id;
-
-    if (req.file) {
-      const { buffer, mimetype, size } = req.file;
-      const img = await client.query(
-        `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
-        [productId, mimetype, buffer, size]
-      );
-      const imgId = img.rows[0].id;
-      await client.query(
-        `UPDATE products SET main_image_id=$1, image_url=$2 WHERE id=$3`,
-        [imgId, `/images/${imgId}`, productId]
-      );
+    if (!id) {
+      const r = await fetch(API + '/admin/products', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+    } else {
+      const r = await fetch(API + '/admin/products/' + id, { method: 'PUT', body: fd });
+      if (!r.ok) throw new Error(await r.text());
     }
-
-    await client.query('COMMIT');
-    res.json({ ok: true, id: productId });
-  } catch (e) {
-    await client.query('ROLLBACK');
-    console.error(e); res.status(400).json({ error: e.message || 'create_error' });
-  } finally {
-    client.release();
+    msg.textContent = 'OK';
+    form.reset(); fillForm({}); // remet etat par défaut via fillForm
+    await loadProducts();
+  } catch (err) {
+    msg.textContent = 'Erreur: ' + err.message;
   }
 });
 
-// UPDATE produit (multipart accepté, remplace l'image si fichier fourni)
-app.put('/admin/products/:id', upload.single('image'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+qs('#resetBtn').addEventListener('click', () => { form.reset(); fillForm({}); });
+qs('#refreshBtn').addEventListener('click', loadProducts);
 
-    const id = req.params.id;
-    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
-    const finalSlug = slug?.trim?.() || (name ? toSlug(name) : undefined);
-
-await client.query(
-  `UPDATE products
-   SET name = COALESCE($1, name),
-       slug = COALESCE($2, slug),
-       description = COALESCE($3, description),
-       price = COALESCE($4, price),
-       stock = COALESCE($5, stock),
-       image_url = COALESCE($6, image_url),
-       category_id = COALESCE($7, category_id),
-       is_available = COALESCE($8, is_available),
-       etat = COALESCE($9, etat),
-       updated_at = now()
-   WHERE id = $10`,
-  [
-    name || null,
-    finalSlug || null,
-    description || null,
-    price || null,
-    stock || null,
-    (image_url?.trim?.() || null),
-    (category_id || null),
-    (typeof is_available !== 'undefined'
-      ? (is_available === 'on' || is_available === 'true' || is_available === true)
-      : null),
-    etat || null, // valeur valide du type etat_type
-    id
-  ]
-);
-
-    if (req.file) {
-      const { buffer, mimetype, size } = req.file;
-      const img = await client.query(
-        `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
-        [id, mimetype, buffer, size]
-      );
-      const imgId = img.rows[0].id;
-      await client.query(
-        `UPDATE products SET main_image_id=$1, image_url=$2, updated_at=now() WHERE id=$3`,
-        [imgId, `/images/${imgId}`, id]
-      );
-    }
-
-    await client.query('COMMIT');
-    res.json({ ok: true });
-  } catch (e) {
-    await client.query('ROLLBACK');
-    console.error(e); res.status(400).json({ error: e.message || 'update_error' });
-  } finally {
-    client.release();
-  }
-});
-
-// DELETE produit
-app.delete('/admin/products/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM products WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e); res.status(400).json({ error: e.message || 'delete_error' });
-  }
-});
-
-// ------- utils dev : ping DB
-app.get('/db-ping', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT 1 AS ok');
-    res.json(r.rows[0]); // { ok: 1 }
-  } catch (e) {
-    console.error(e); res.status(500).json({ error: e.message });
-  }
-});
-
-const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => {
-  console.log(`✅ API running on http://localhost:${port}`);
-});
+(async function init(){
+  await loadCategories();
+  await loadProducts();
+  // si création, initialise le formulaire proprement (incl. état=Neuf)
+  fillForm({});
+})();
+</script>
+</body>
+</html>
