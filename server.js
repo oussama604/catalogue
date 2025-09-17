@@ -37,13 +37,13 @@ app.get('/categories', async (req, res) => {
 app.get('/products', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
-             p.is_available, p.created_at, p.updated_at,
-             p.category_id, c.name AS category_name, c.slug AS category_slug
-      FROM products p
-      LEFT JOIN categories c ON c.id = p.category_id
-      ORDER BY p.created_at DESC
-    `);
+  SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
+         p.is_available, p.created_at, p.updated_at, p.etat,
+         p.category_id, c.name AS category_name, c.slug AS category_slug
+  FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
+  ORDER BY p.created_at DESC
+`);
     res.json(rows);
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'database_error' });
@@ -53,13 +53,13 @@ app.get('/products', async (req, res) => {
 app.get('/products-all', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
-             p.is_available, p.created_at, p.updated_at,
-             p.category_id, c.name AS category_name, c.slug AS category_slug
-      FROM products p
-      LEFT JOIN categories c ON c.id = p.category_id
-      ORDER BY p.created_at DESC
-    `);
+  SELECT p.id, p.name, p.slug, p.description, p.price, p.stock, p.image_url,
+         p.is_available, p.created_at, p.updated_at, p.etat,
+         p.category_id, c.name AS category_name, c.slug AS category_slug
+  FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
+  ORDER BY p.created_at DESC
+`);
     res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60'); // 5 min
     res.json(rows);
   } catch (e) {
@@ -107,18 +107,24 @@ app.post('/admin/products', upload.single('image'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { name, slug, description, price, stock, category_id, is_available, image_url } = req.body;
-    const finalSlug = slug?.trim() || toSlug(name);
+   const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
 
-    const ins = await client.query(
-      `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id`,
-      [
-        name, finalSlug, description || null, price || null, stock || null,
-        image_url?.trim() || null, category_id || null, is_available === 'on' || is_available === 'true' || is_available === true
-      ]
-    );
+const ins = await client.query(
+  `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available, etat)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+   RETURNING id`,
+  [
+    name,
+    finalSlug,
+    description || null,
+    price || null,
+    stock || null,
+    image_url?.trim() || null,
+    category_id || null,
+    (is_available === 'on' || is_available === 'true' || is_available === true),
+    etat || null // valeur de votre type etat_type (ex: 'Neuf')
+  ]
+);
     const productId = ins.rows[0].id;
 
     if (req.file) {
@@ -152,35 +158,36 @@ app.put('/admin/products/:id', upload.single('image'), async (req, res) => {
     await client.query('BEGIN');
 
     const id = req.params.id;
-    const { name, slug, description, price, stock, category_id, is_available, image_url } = req.body;
-    const finalSlug = slug?.trim() || (name ? toSlug(name) : undefined);
+    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
 
-    await client.query(
-      `UPDATE products
-       SET name = COALESCE($1, name),
-           slug = COALESCE($2, slug),
-           description = COALESCE($3, description),
-           price = COALESCE($4, price),
-           stock = COALESCE($5, stock),
-           image_url = COALESCE($6, image_url),
-           category_id = COALESCE($7, category_id),
-           is_available = COALESCE($8, is_available),
-           updated_at = now()
-       WHERE id = $9`,
-      [
-        name || null,
-        finalSlug || null,
-        description || null,
-        price || null,
-        stock || null,
-        (image_url?.trim?.() || null),
-        (category_id || null),
-        (typeof is_available !== 'undefined'
-          ? (is_available === 'on' || is_available === 'true' || is_available === true)
-          : null),
-        id
-      ]
-    );
+await client.query(
+  `UPDATE products
+   SET name = COALESCE($1, name),
+       slug = COALESCE($2, slug),
+       description = COALESCE($3, description),
+       price = COALESCE($4, price),
+       stock = COALESCE($5, stock),
+       image_url = COALESCE($6, image_url),
+       category_id = COALESCE($7, category_id),
+       is_available = COALESCE($8, is_available),
+       etat = COALESCE($9, etat),
+       updated_at = now()
+   WHERE id = $10`,
+  [
+    name || null,
+    finalSlug || null,
+    description || null,
+    price || null,
+    stock || null,
+    (image_url?.trim?.() || null),
+    (category_id || null),
+    (typeof is_available !== 'undefined'
+      ? (is_available === 'on' || is_available === 'true' || is_available === true)
+      : null),
+    etat || null, // valeur valide du type etat_type
+    id
+  ]
+);
 
     if (req.file) {
       const { buffer, mimetype, size } = req.file;
