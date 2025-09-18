@@ -103,7 +103,7 @@ app.get('/images/:id', async (req, res) => {
 // ------- routes admin (CRUD) : AUCUNE AUTH ICI (simple). À protéger si besoin.
 
 // CREATE produit (URL image OU upload fichier). Si fichier, stocke en DB et remplace image_url.
-app.post('/admin/products', upload.single('image'), async (req, res) => {
+app.post('/admin/products', upload.array('images'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -129,18 +129,24 @@ app.post('/admin/products', upload.single('image'), async (req, res) => {
     );
     const productId = ins.rows[0].id;
 
-    if (req.file) {
-      const { buffer, mimetype, size } = req.file;
-      const img = await client.query(
-        `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
-        [productId, mimetype, buffer, size]
-      );
-      const imgId = img.rows[0].id;
-      await client.query(
-        `UPDATE products SET main_image_id=$1, image_url=$2 WHERE id=$3`,
-        [imgId, `/images/${imgId}`, productId]
-      );
+    if (req.files && req.files.length) {
+      let mainImageId = null;
+      for (const f of req.files) {
+        const { buffer, mimetype, size } = f;
+        const img = await client.query(
+          `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
+           VALUES ($1,$2,$3,$4) RETURNING id`,
+          [productId, mimetype, buffer, size]
+        );
+        const imgId = img.rows[0].id;
+        if (!mainImageId) mainImageId = imgId;
+      }
+      if (mainImageId) {
+        await client.query(
+          `UPDATE products SET main_image_id=$1, image_url=$2 WHERE id=$3`,
+          [mainImageId, `/images/${mainImageId}`, productId]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -154,7 +160,7 @@ app.post('/admin/products', upload.single('image'), async (req, res) => {
 });
 
 // UPDATE produit (multipart accepté, remplace l'image si fichier fourni)
-app.put('/admin/products/:id', upload.single('image'), async (req, res) => {
+app.put('/admin/products/:id', upload.array('images'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -192,18 +198,24 @@ await client.query(
   ]
 );
 
-    if (req.file) {
-      const { buffer, mimetype, size } = req.file;
-      const img = await client.query(
-        `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
-        [id, mimetype, buffer, size]
-      );
-      const imgId = img.rows[0].id;
-      await client.query(
-        `UPDATE products SET main_image_id=$1, image_url=$2, updated_at=now() WHERE id=$3`,
-        [imgId, `/images/${imgId}`, id]
-      );
+    if (req.files && req.files.length) {
+      let mainImageId = null;
+      for (const f of req.files) {
+        const { buffer, mimetype, size } = f;
+        const img = await client.query(
+          `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
+           VALUES ($1,$2,$3,$4) RETURNING id`,
+          [id, mimetype, buffer, size]
+        );
+        const imgId = img.rows[0].id;
+        if (!mainImageId) mainImageId = imgId;
+      }
+      if (mainImageId) {
+        await client.query(
+          `UPDATE products SET main_image_id=$1, image_url=$2, updated_at=now() WHERE id=$3`,
+          [mainImageId, `/images/${mainImageId}`, id]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -240,3 +252,5 @@ const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`✅ API running on http://localhost:${port}`);
 });
+
+
