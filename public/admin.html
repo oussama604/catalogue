@@ -21,7 +21,7 @@
 </head>
 <body>
 <h1>Admin Catalogue</h1>
-<p class="muted">Image : soit vous collez une <b>URL</b>, soit vous uploadez un <b>fichier</b>. Si fichier, il sera stocké en base et l’URL deviendra <code>/images/&lt;id&gt;</code>.</p>
+
 
 <div class="grid">
   <form id="form">
@@ -30,8 +30,8 @@
     <label>Nom</label>
     <input name="name" id="name" required>
 
-    <label>Slug</label>
-    <input name="slug" id="slug" >
+    <label>Slug (laisser vide = auto)</label>
+    <input name="slug" id="slug" placeholder="auto">
 
     <label>Description</label>
     <textarea name="description" id="description"></textarea>
@@ -54,8 +54,8 @@
     <label>URL de l'image</label>
     <input type="url" name="image_url" id="image_url" placeholder="https://...">
 
-    <label>OU choisir un fichier</label>
-    <input type="file" name="image" id="image" accept="image/*">
+    <label>OU choisir des fichiers</label>
+    <input type="file" name="images" id="image" accept="image/*" multiple>
 
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn primary" type="submit" id="submitBtn">Créer</button>
