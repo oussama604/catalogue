@@ -78,7 +78,20 @@ app.get('/products/:slug', async (req, res) => {
       WHERE p.slug = $1
     `, [req.params.slug]);
     if (!rows.length) return res.status(404).json({ error: 'not_found' });
-    res.json(rows[0]);
+
+    const product = rows[0];
+    try {
+      const imgs = await pool.query(
+        `SELECT id, mime_type, size_bytes FROM product_images WHERE product_id = $1 ORDER BY id ASC`,
+        [product.id]
+      );
+      product.images = imgs.rows.map(r => ({ id: r.id, url: `/images/${r.id}`, mime_type: r.mime_type, size_bytes: r.size_bytes }));
+    } catch (e2) {
+      console.error('images_fetch_error', e2);
+      product.images = [];
+    }
+
+    res.json(product);
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'database_error' });
   }
@@ -102,14 +115,14 @@ app.get('/images/:id', async (req, res) => {
 
 // ------- routes admin (CRUD) : AUCUNE AUTH ICI (simple). À protéger si besoin.
 
-// CREATE produit (URL image OU upload fichier). Si fichier, stocke en DB et remplace image_url.
-app.post('/admin/products', upload.array('images'), async (req, res) => {
+// CREATE produit (URL image OU upload fichier). Accepte 'image' (unique) ou 'images' (multiple).
+app.post('/admin/products', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'images', maxCount: 20 }]), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
+    const { name, /* slug ignored */ description, price, stock, category_id, is_available, image_url, etat } = req.body;
 
-    const finalSlug = slug?.trim?.() || toSlug(name); // <-- assurez-vous que ceci existe
+    const finalSlug = toSlug(name);
 
     const ins = await client.query(
       `INSERT INTO products (name, slug, description, price, stock, image_url, category_id, is_available, etat)
@@ -129,9 +142,13 @@ app.post('/admin/products', upload.array('images'), async (req, res) => {
     );
     const productId = ins.rows[0].id;
 
-    if (req.files && req.files.length) {
+    const uploaded = [
+      ...(Array.isArray(req.files?.image) ? req.files.image : []),
+      ...(Array.isArray(req.files?.images) ? req.files.images : [])
+    ];
+    if (uploaded.length) {
       let mainImageId = null;
-      for (const f of req.files) {
+      for (const f of uploaded) {
         const { buffer, mimetype, size } = f;
         const img = await client.query(
           `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
@@ -159,15 +176,15 @@ app.post('/admin/products', upload.array('images'), async (req, res) => {
   }
 });
 
-// UPDATE produit (multipart accepté, remplace l'image si fichier fourni)
-app.put('/admin/products/:id', upload.array('images'), async (req, res) => {
+// UPDATE produit (multipart accepté). Accepte 'image' (unique) ou 'images' (multiple)
+app.put('/admin/products/:id', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'images', maxCount: 20 }]), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     const id = req.params.id;
-    const { name, slug, description, price, stock, category_id, is_available, image_url, etat } = req.body;
-    const finalSlug = slug?.trim?.() || (name ? toSlug(name) : undefined);
+    const { name, /* slug ignored */ description, price, stock, category_id, is_available, image_url, etat } = req.body;
+    const finalSlug = (name ? toSlug(name) : undefined);
 
 await client.query(
   `UPDATE products
@@ -198,9 +215,13 @@ await client.query(
   ]
 );
 
-    if (req.files && req.files.length) {
+    const uploaded = [
+      ...(Array.isArray(req.files?.image) ? req.files.image : []),
+      ...(Array.isArray(req.files?.images) ? req.files.images : [])
+    ];
+    if (uploaded.length) {
       let mainImageId = null;
-      for (const f of req.files) {
+      for (const f of uploaded) {
         const { buffer, mimetype, size } = f;
         const img = await client.query(
           `INSERT INTO product_images (product_id, mime_type, bytes, size_bytes)
