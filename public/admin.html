@@ -30,8 +30,6 @@
     <label>Nom</label>
     <input name="name" id="name" required>
 
-    <label>Slug (laisser vide = auto)</label>
-    <input name="slug" id="slug" placeholder="auto">
 
     <label>Description</label>
     <textarea name="description" id="description"></textarea>
@@ -124,7 +122,7 @@ async function loadProducts() {
     return `
     <tr>
       <td>${src ? `<img class="thumb" src="${src}">` : ''}</td>
-      <td><strong>${p.name}</strong><br><span class="muted">${p.slug}</span></td>
+      <td><strong>${p.name}</strong></td>
       <td>${p.category_name || ''}</td>
       <td>${p.price ?? ''}</td>
       <td>${p.stock ?? ''}</td>
@@ -141,7 +139,7 @@ async function loadProducts() {
 function fillForm(p) {
   qs('#id').value = p.id || '';
   qs('#name').value = p.name || '';
-  qs('#slug').value = p.slug || '';
+  // slug supprimé du formulaire
   qs('#description').value = p.description || '';
   qs('#price').value = p.price ?? '';
   qs('#stock').value = p.stock ?? '';
