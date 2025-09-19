@@ -166,7 +166,7 @@ tableBody.addEventListener('click', async (e) => {
     const items = await fetchJSON(API + '/products');
     const p = items.find(x => x.id == id);
     if (!p) return;
-    const detail = await fetchJSON(API + '/products/' + encodeURIComponent(p.slug));
+    const detail = await fetchJSON(API + '/products/' + encodeURIComponent(p.id));
     fillForm(detail);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
